@@ -1,3 +1,11 @@
+'''
+Saumya: Making modifications to use custom datasets
+
+run command:
+
+CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_DRIVE.py local
+CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_DRIVE.py local
+'''
 import torch
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter, FileWriter
@@ -15,8 +23,8 @@ import math
 
 # own files
 import utils
-from data.batch_provider import resize_batch
-import data.bratsDataset as bratsDataset
+from torch.utils.data import DataLoader
+from dataloader import DRIVE
 
 # catch all the warnings with the debugger
 # import warnings
@@ -41,12 +49,12 @@ class UNetModel:
                                     reversible=exp_config.use_reversible
                                     )
         self.exp_config = exp_config
-        self.batch_size = exp_config.batch_size
+        self.batch_size = exp_config.train_batch_size
         self.logger = logger
 
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.net.to(self.device)
-        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=1e-3, weight_decay=1e-5)
+        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=exp_config.learning_rate, weight_decay=1e-5)
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer, 'min', min_lr=1e-4, verbose=True, patience=50000)
 
@@ -91,51 +99,65 @@ class UNetModel:
             self.validation_writer = SummaryWriter(comment='_validation')
         self.iteration = 0
 
-    def train(self, data):
+        # Train Data       
+        training_set = DRIVE(exp_config.train_datalist, exp_config.folders, is_training= True)
+        self.training_generator = torch.utils.data.DataLoader(training_set,batch_size=exp_config.train_batch_size,shuffle=True,num_workers=2, drop_last=True)
+
+        # Validation Data
+        validation_set = DRIVE(exp_config.validation_datalist, exp_config.folders, is_training= True, constcorner=True) # dependent on image size
+        self.validation_generator = torch.utils.data.DataLoader(validation_set,batch_size=exp_config.val_batch_size,shuffle=False,num_workers=2, drop_last=False)
+
+    def train(self):
         self.net.train()
         self.logger.info('Starting training.')
         self.logger.info('Current filters: {}'.format(self.exp_config.filter_channels))
         self.logger.info('Batch size: {}'.format(self.batch_size))
 
-        for self.iteration in range(1, self.exp_config.iterations):
-            x_b, s_b = data.train.next_batch(self.batch_size)
+        #for self.iteration in range(1, self.exp_config.iterations):
+        while self.iteration < self.exp_config.iterations:
+            for x_b, s_b, _ in self.training_generator: 
+                self.iteration += 1
+                #x_b, s_b = data.train.next_batch(self.batch_size)
 
-            patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
+                #patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
 
-            mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
-            mask = torch.unsqueeze(mask, 1)
+                #mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
+                #mask = torch.unsqueeze(mask, 1)
 
-            self.mask = mask
-            self.patch = patch
+                patch = x_b.to(self.device, dtype=torch.float)
+                mask = s_b.to(self.device, dtype=torch.float)
 
-            self.net.forward(patch, mask, training=True)
-            self.loss = self.net.loss(mask)
+                self.mask = mask
+                self.patch = patch
 
-            self.tot_loss += self.loss
+                self.net.forward(patch, mask, training=True)
+                self.loss = self.net.loss(mask)
 
-            self.reconstruction_loss += self.net.reconstruction_loss
-            self.kl_loss += self.net.kl_divergence_loss
+                self.tot_loss += self.loss
 
-            self.optimizer.zero_grad()
+                self.reconstruction_loss += self.net.reconstruction_loss
+                self.kl_loss += self.net.kl_divergence_loss
 
-            self.loss.backward()
-            self.optimizer.step()
+                self.optimizer.zero_grad()
 
-            if self.iteration % self.exp_config.validation_frequency == 0:
-                self.validate(data)
+                self.loss.backward()
+                self.optimizer.step()
 
-            if self.iteration % self.exp_config.logging_frequency == 0:
-                self.logger.info('Iteration {} Loss {}'.format(self.iteration, self.loss))
-                #self._create_tensorboard_summary()
-                self.tot_loss = 0
-                self.kl_loss = 0
-                self.reconstruction_loss = 0
+                if self.iteration % self.exp_config.validation_frequency == 0:
+                    self.validate()
 
-            self.scheduler.step(self.loss)
+                if self.iteration % self.exp_config.logging_frequency == 0:
+                    self.logger.info('Iteration {} Loss {}'.format(self.iteration, self.loss))
+                    #self._create_tensorboard_summary()
+                    self.tot_loss = 0
+                    self.kl_loss = 0
+                    self.reconstruction_loss = 0
+
+                self.scheduler.step(self.loss)
 
         self.logger.info('Finished training.')
 
-    def validate(self, data):
+    def validate(self):
         self.net.eval()
         with torch.no_grad():
             self.logger.info('Validation for step {}'.format(self.iteration))
@@ -156,30 +178,37 @@ class UNetModel:
 
             time_ = time.time()
 
-            validation_set_size = data.validation.images.shape[0]\
-                if self.exp_config.num_validation_images == 'all' else self.exp_config.num_validation_images
+            #validation_set_size = data.validation.images.shape[0]\
+                #if self.exp_config.num_validation_images == 'all' else self.exp_config.num_validation_images
+            validation_iterator = iter(self.validation_generator)
+            for _ in range(len(self.validation_generator)):
 
-            for ii in range(validation_set_size):
-
-                s_gt_arr = data.validation.labels[ii, ...]
-
+                #s_gt_arr = data.validation.labels[ii, ...]
+                x_b, s_b, _ = next(validation_iterator)
                 # from HW to NCHW
-                x_b = data.validation.images[ii, ...]
-                patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
-                val_patch = patch.unsqueeze(dim=0).unsqueeze(dim=1)
+                #x_b = data.validation.images[ii, ...]
+                #patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
+                #val_patch = patch.unsqueeze(dim=0).unsqueeze(dim=1)
+                patch = x_b.to(self.device, dtype=torch.float)
 
-                s_b = s_gt_arr[:, :, np.random.choice(self.exp_config.annotator_range)]
-                mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
-                val_mask = mask.unsqueeze(dim=0).unsqueeze(dim=1)
-                val_masks = torch.tensor(s_gt_arr, dtype=torch.float32).to(self.device)  # HWC
-                val_masks = val_masks.transpose(0, 2).transpose(1, 2)  # CHW
+                #s_b = s_gt_arr[:, :, np.random.choice(self.exp_config.annotator_range)]
+                #mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
+                mask = s_b.to(self.device, dtype=torch.float)
 
-                patch_arrangement = val_patch.repeat((self.exp_config.validation_samples, 1, 1, 1))
+                #val_masks = torch.tensor(s_gt_arr, dtype=torch.float32).to(self.device)  # HWC
+                #val_masks = val_masks.transpose(0, 2).transpose(1, 2)  # CHW
+                val_mask = mask
+                val_masks = mask
+                #print("saum: val_masks shape: {}".format(val_masks.shape)) #  torch.Size([1, 1, 128, 128])
 
-                mask_arrangement = val_mask.repeat((self.exp_config.validation_samples, 1, 1, 1))
+                #patch_arrangement = val_patch.repeat((self.exp_config.validation_samples, 1, 1, 1))
 
-                self.mask = mask_arrangement
-                self.patch = patch_arrangement
+                #mask_arrangement = val_mask.repeat((self.exp_config.validation_samples, 1, 1, 1))
+                patch_arrangement = patch 
+                mask_arrangement = mask
+
+                self.mask = mask
+                self.patch = patch
 
                 # training=True for constructing posterior as well
                 s_out_eval_list = self.net.forward(patch_arrangement, mask_arrangement, training=False)
@@ -200,7 +229,8 @@ class UNetModel:
                                                         label_range=range(1, self.exp_config.n_classes))
 
                 # num_gts, nlabels, H, W
-                s_gt_arr_r = val_masks.unsqueeze(dim=1)
+                #s_gt_arr_r = val_masks.unsqueeze(dim=1)
+                s_gt_arr_r = val_masks
                 ground_truth_arrangement_one_hot = utils.convert_batch_to_onehot(s_gt_arr_r, nlabels=self.exp_config.n_classes)
                 ncc = utils.variance_ncc_dist(s_prediction_softmax_arrangement, ground_truth_arrangement_one_hot)
 
@@ -568,7 +598,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Script for training")
     parser.add_argument("EXP_PATH", type=str, help="Path to experiment config file")
     parser.add_argument("LOCAL", type=str, help="Is this script run on the local machine or the BIWI cluster?")
-    parser.add_argument("dummy", type=str, help="Is the module run with dummy training?")
+    #parser.add_argument("dummy", type=str, help="Is the module run with dummy training?")
     args = parser.parse_args()
 
     config_file = args.EXP_PATH
@@ -608,8 +638,8 @@ if __name__ == '__main__':
     # model.train_brats(trainloader)
 
     # this loads either lidc or uzh data
-    data = exp_config.data_loader(sys_config=sys_config, exp_config=exp_config)
+    #data = exp_config.data_loader(sys_config=sys_config, exp_config=exp_config)
 
-    model.train(data)
+    model.train()
 
     model.save_model('last')
