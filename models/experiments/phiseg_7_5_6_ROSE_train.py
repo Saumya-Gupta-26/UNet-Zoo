@@ -3,12 +3,13 @@ import torch.nn as nn
 from models.phiseg import PHISeg
 from utils import normalise_image
 
-experiment_name = 'PHISeg_7_5_6_DRIVE'
-log_dir_name = 'DRIVE'
+dataname = 'rose'
+experiment_name = 'PHISeg_7_5_6_ROSE'
+log_dir_name = 'ROSE'
 
-folders = ["/data/saumgupta/DRIVE/training/images", "/data/saumgupta/DRIVE/training/1st_manual"]
-train_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/train-list.csv"
-validation_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/val-list.csv"
+folders = ["/data/saumgupta/rose/data/ROSE-1/SVC/train/img", "/data/saumgupta/rose/data/ROSE-1/SVC/train/gt"]
+train_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/ROSE/train-list.csv"
+validation_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/ROSE/val-list.csv"
 
 # number of filter for the latent levels, they will be applied in the order as loaded into the list
 filter_channels = [32, 64, 128, 192, 192, 192, 192]
@@ -25,8 +26,8 @@ beta = 10.0 # not used
 use_reversible = False
 exponential_weighting = True
 
-# use 1 for grayscale, 3 for RGB images
-input_channels = 3
+# use 1 for grayscale (eg ROSE, parse), 3 for RGB images (eg DRIVE)
+input_channels = 1
 epochs_to_train = 20
 train_batch_size = 6
 val_batch_size = 1

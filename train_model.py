@@ -3,8 +3,11 @@ Saumya: Making modifications to use custom datasets
 
 run command:
 
-CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_DRIVE.py local
-CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_DRIVE.py local
+CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_DRIVE_train.py local
+CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_DRIVE_train.py local
+
+CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_ROSE_train.py local
+CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_ROSE_train.py local
 '''
 import torch
 import numpy as np
@@ -24,7 +27,7 @@ import math
 # own files
 import utils
 from torch.utils.data import DataLoader
-from dataloader import DRIVE
+from dataloader import DRIVE, ROSE
 
 # catch all the warnings with the debugger
 # import warnings
@@ -99,15 +102,20 @@ class UNetModel:
             self.validation_writer = SummaryWriter(comment='_validation')
         self.iteration = 0
 
-        # Train Data       
-        training_set = DRIVE(exp_config.train_datalist, exp_config.folders, is_training= True)
-        self.training_generator = torch.utils.data.DataLoader(training_set,batch_size=exp_config.train_batch_size,shuffle=True,num_workers=2, drop_last=True)
-
-        # Validation Data
-        validation_set = DRIVE(exp_config.validation_datalist, exp_config.folders, is_training= True, constcorner=True) # dependent on image size
-        self.validation_generator = torch.utils.data.DataLoader(validation_set,batch_size=exp_config.val_batch_size,shuffle=False,num_workers=2, drop_last=False)
 
     def train(self):
+
+        # Train and Validation Data 
+        if exp_config.dataname == "drive":      
+            training_set = DRIVE(exp_config.train_datalist, exp_config.folders, is_training= True)
+            validation_set = DRIVE(exp_config.validation_datalist, exp_config.folders, is_training= True, constcorner=True) # dependent on image size
+        elif exp_config.dataname == "rose":      
+            training_set = ROSE(exp_config.train_datalist, exp_config.folders, is_training= True)
+            validation_set = ROSE(exp_config.validation_datalist, exp_config.folders, is_training= True, constcorner=True) # dependent on image size
+
+        self.training_generator = torch.utils.data.DataLoader(training_set,batch_size=exp_config.train_batch_size,shuffle=True,num_workers=2, drop_last=True)
+        self.validation_generator = torch.utils.data.DataLoader(validation_set,batch_size=exp_config.val_batch_size,shuffle=False,num_workers=2, drop_last=False)
+
         self.net.train()
         self.logger.info('Starting training.')
         self.logger.info('Current filters: {}'.format(self.exp_config.filter_channels))
@@ -360,7 +368,7 @@ class UNetModel:
 
         self.net.train()
 
-    def test(self, data, sys_config):
+    def test(self, test_generator, sys_config):
         self.net.eval()
         with torch.no_grad():
 
@@ -391,24 +399,29 @@ class UNetModel:
             end_ged = 0.0
             end_ncc = 0.0
 
+            ii = -1
             for i in range(10):
                 self.logger.info('Doing iteration {}'.format(i))
                 n_samples = 10
 
-                for ii in range(data.test.images.shape[0]):
-
-                    s_gt_arr = data.test.labels[ii, ...]
+                #for ii in range(data.test.images.shape[0]):
+                for x_b, s_b, _ in test_generator:
+                    ii += 1
+                    #s_gt_arr = data.test.labels[ii, ...] # saum i think num_gt,C,H,W
 
                     # from HW to NCHW
-                    x_b = data.test.images[ii, ...]
-                    patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
-                    val_patch = patch.unsqueeze(dim=0).unsqueeze(dim=1)
+                    #x_b = data.test.images[ii, ...]
+                    #patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
+                    patch = x_b.to(self.device)
+                    val_patch = patch#.unsqueeze(dim=0).unsqueeze(dim=1)
 
-                    s_b = s_gt_arr[:, :, np.random.choice(self.exp_config.annotator_range)]
-                    mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
-                    val_mask = mask.unsqueeze(dim=0).unsqueeze(dim=1)
-                    val_masks = torch.tensor(s_gt_arr, dtype=torch.float32).to(self.device)  # HWC
-                    val_masks = val_masks.transpose(0, 2).transpose(1, 2)  # CHW
+                    #s_b = s_gt_arr[:, :, np.random.choice(self.exp_config.annotator_range)]
+                    #mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
+                    mask = s_b.to(self.device)
+                    val_mask = mask#.unsqueeze(dim=0).unsqueeze(dim=1)
+                    val_masks = torch.squeeze(s_b, dim=0)
+                    #val_masks = torch.tensor(s_gt_arr, dtype=torch.float32).to(self.device)  # HWC
+                    #val_masks = val_masks.transpose(0, 2).transpose(1, 2)  # CHW
 
                     patch_arrangement = val_patch.repeat((n_samples, 1, 1, 1))
 
@@ -504,7 +517,7 @@ class UNetModel:
             self.logger.info('Mean ged: {}'.format(end_ged / 10))
             self.logger.info('Mean ncc: {}'.format(end_ncc / 10))
 
-    def generate_images(self, data, sys_config):
+    def generate_images(self, test_generator, sys_config):
         self.net.eval()
         with torch.no_grad():
 
@@ -533,20 +546,27 @@ class UNetModel:
 
             n_samples = 10
 
-            for ii in range(31,100):
+            ii = -1
+            #for ii in range(31,100):
+            for x_b, s_b, _ in test_generator:
+                ii += 1
 
-                s_gt_arr = data.test.labels[ii, ...]
+                #s_gt_arr = data.test.labels[ii, ...]
 
                 # from HW to NCHW
-                x_b = data.test.images[ii, ...]
-                patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
-                val_patch = patch.unsqueeze(dim=0).unsqueeze(dim=1)
+                #x_b = data.test.images[ii, ...]
+                #patch = torch.tensor(x_b, dtype=torch.float32).to(self.device)
+                #val_patch = patch.unsqueeze(dim=0).unsqueeze(dim=1)
+                patch = x_b.to(self.device)
+                val_patch = patch 
 
-                s_b = s_gt_arr[:, :, np.random.choice(self.exp_config.annotator_range)]
-                mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
-                val_mask = mask.unsqueeze(dim=0).unsqueeze(dim=1)
-                val_masks = torch.tensor(s_gt_arr, dtype=torch.float32).to(self.device)  # HWC
-                val_masks = val_masks.transpose(0, 2).transpose(1, 2)  # CHW
+                #s_b = s_gt_arr[:, :, np.random.choice(self.exp_config.annotator_range)]
+                #mask = torch.tensor(s_b, dtype=torch.float32).to(self.device)
+                mask = s_b.to(self.device)
+                val_mask = mask#.unsqueeze(dim=0).unsqueeze(dim=1)
+                val_masks = torch.squeeze(s_b, dim=0)
+                #val_masks = torch.tensor(s_gt_arr, dtype=torch.float32).to(self.device)  # HWC
+                #val_masks = val_masks.transpose(0, 2).transpose(1, 2)  # CHW
 
                 patch_arrangement = val_patch.repeat((n_samples, 1, 1, 1))
 
@@ -571,6 +591,7 @@ class UNetModel:
         save_image(image, os.path.join(save_location, '{}image.png'.format(iteration)), pad_value=1, scale_each=True,
                    normalize=True)
 
+        ground_truth_labels = torch.unsqueeze(ground_truth_labels, dim=0)
         for i in range(self.exp_config.num_labels_per_subject):
             save_image(ground_truth_labels[i].float(),
                        os.path.join(save_location, '{}mask{}.png'.format(iteration, i)),

@@ -5,7 +5,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 at_biwi = False  # Are you running this code from the ETH Computer Vision Lab (Biwi)?
 
 project_root = '/home/saumgupta/UNet-Zoo'
-log_root = '/data/saumgupta/DRIVE/unet-zoo'
+log_root = '/data/saumgupta/unet-zoo'
 
 dummy_data_root = '/Users/marcgantenbein/PycharmProjects/UNet-Zoo/data'
 

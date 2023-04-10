@@ -287,6 +287,8 @@ def convert_to_onehot(lblmap, nlabels):
 # needs a torch tensor as input instead of numpy array
 # accepts format HW and CHW
 def convert_to_onehot_torch(lblmap, nlabels):
+    if len(lblmap.shape) == 2: # added by saum
+        lblmap = lblmap.unsqueeze(dim=0)
     if len(lblmap.shape) == 3:
         # 2D image
         output = torch.zeros((nlabels, lblmap.shape[-2], lblmap.shape[-1]))

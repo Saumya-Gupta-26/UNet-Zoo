@@ -6,7 +6,7 @@ from utils import normalise_image
 experiment_name = 'ProbabilisticUnet_DRIVE'
 log_dir_name = 'DRIVE'
 
-folders = ["/data/saumgupta/DRIVE/training/images", "/data/saumgupta/DRIVE/training/1st_manual"]
+folders = ["/data/saumgupta/DRIVE/test/images-patches/", "/data/saumgupta/DRIVE/test/1st_manual-png-patches"]
 train_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/train-list.csv"
 validation_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/val-list.csv"
 
