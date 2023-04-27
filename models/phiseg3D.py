@@ -7,6 +7,7 @@ import revtorch as rv
 import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
+import pdb
 from utils import show_tensor
 
 
@@ -347,7 +348,7 @@ class Likelihood(nn.Module):
         for i in range(latent_levels - 1):
             input = self.num_filters[i] + self.num_filters[i + 1 + self.lvl_diff]
             output = self.num_filters[i + self.lvl_diff]
-
+            #pdb.set_trace()
             if reversible:
                 self.likelihood_post_c_path.append(ReversibleSequence(input_dim=input, output_dim=output, reversible_depth=1))
             else:
@@ -366,6 +367,7 @@ class Likelihood(nn.Module):
         post_z = [None] * self.latent_levels
         post_c = [None] * self.latent_levels
 
+        #pdb.set_trace()
         # start from the downmost layer and the last filter
         for i in range(self.latent_levels):
             assert z[-i-1].shape[1] == 2
@@ -491,6 +493,7 @@ class PHISeg3D(nn.Module):
         if training:
             self.posterior_latent_space, self.posterior_mu, self.posterior_sigma = self.posterior(patch, mask)
             self.prior_latent_space, self.prior_mu, self.prior_sigma = self.prior(patch, training_prior=True, z_list=self.posterior_latent_space)
+            #pdb.set_trace()
             self.s_out_list = self.likelihood(self.posterior_latent_space)
         else:
             self.posterior_latent_space, self.posterior_mu, self.posterior_sigma = self.posterior(patch, mask)

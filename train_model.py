@@ -8,6 +8,9 @@ CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/exp
 
 CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_ROSE_train.py local
 CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_ROSE_train.py local
+
+CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_PARSE_train.py local
+CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_PARSE_train.py local
 '''
 import torch
 import numpy as np
@@ -23,11 +26,13 @@ import argparse
 import time
 from medpy.metric import dc
 import math
-
+import pdb
 # own files
 import utils
 from torch.utils.data import DataLoader
-from dataloader import DRIVE, ROSE
+from dataloader import DRIVE, ROSE, Dataset3D_OnlineLoad
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 # catch all the warnings with the debugger
 # import warnings
@@ -112,6 +117,9 @@ class UNetModel:
         elif exp_config.dataname == "rose":      
             training_set = ROSE(exp_config.train_datalist, exp_config.folders, is_training= True)
             validation_set = ROSE(exp_config.validation_datalist, exp_config.folders, is_training= True, constcorner=True) # dependent on image size
+        elif exp_config.dataname == "parse":      
+            training_set = Dataset3D_OnlineLoad(exp_config.train_datalist, exp_config.folders)
+            validation_set = Dataset3D_OnlineLoad(exp_config.validation_datalist, exp_config.folders,is_training=False) # dependent on image size
 
         self.training_generator = torch.utils.data.DataLoader(training_set,batch_size=exp_config.train_batch_size,shuffle=True,num_workers=2, drop_last=True)
         self.validation_generator = torch.utils.data.DataLoader(validation_set,batch_size=exp_config.val_batch_size,shuffle=False,num_workers=2, drop_last=False)
@@ -240,10 +248,15 @@ class UNetModel:
                 #s_gt_arr_r = val_masks.unsqueeze(dim=1)
                 s_gt_arr_r = val_masks
                 ground_truth_arrangement_one_hot = utils.convert_batch_to_onehot(s_gt_arr_r, nlabels=self.exp_config.n_classes)
-                ncc = utils.variance_ncc_dist(s_prediction_softmax_arrangement, ground_truth_arrangement_one_hot)
-
-                s_ = torch.argmax(s_prediction_softmax_mean, dim=0) # HW
-                s = val_mask.view(val_mask.shape[-2], val_mask.shape[-1]) #HW
+                
+                if self.exp_config.dataname == "parse":
+                    ncc = utils.variance_ncc_dist_3d(s_prediction_softmax_arrangement, ground_truth_arrangement_one_hot)
+                    s_ = torch.argmax(s_prediction_softmax_mean, dim=0) # HWD
+                    s = val_mask.view(val_mask.shape[-3], val_mask.shape[-2], val_mask.shape[-1]) #HWD
+                else:
+                    ncc = utils.variance_ncc_dist(s_prediction_softmax_arrangement, ground_truth_arrangement_one_hot)
+                    s_ = torch.argmax(s_prediction_softmax_mean, dim=0) # HW
+                    s = val_mask.view(val_mask.shape[-2], val_mask.shape[-1]) #HW
 
                 # Write losses to list
                 per_lbl_dice = []
@@ -577,7 +590,20 @@ class UNetModel:
 
                 # training=True for constructing posterior as well
                 s_out_eval_list = self.net.forward(patch_arrangement, mask_arrangement, training=False)
-                s_prediction_softmax_arrangement = self.net.accumulate_output(s_out_eval_list, use_softmax=True)
+                s_prediction_softmax_arrangement = self.net.accumulate_output(s_out_eval_list, use_softmax=True) # torch.Size([10, 2, 256, 256])  # 10 vars of one input
+                #pdb.set_trace()   # can generate heatmap at this stage
+
+                imglist = list(s_prediction_softmax_arrangement.cpu().detach().numpy())
+                imglist = [ele[1,:,:] for ele in imglist]
+                imglist = np.array(imglist) # NHW
+                var_map = np.var(imglist, axis=0) # HW
+                var_map = var_map/np.max(var_map)
+                ax = sns.heatmap(var_map, cmap=plt.cm.coolwarm, vmin=0, vmax=1)
+                ax.set_axis_off()
+                plt.show()
+                plt.savefig(os.path.join(image_path, '{}sample_heatmap.png'.format(ii)), bbox_inches='tight', pad_inches=0)
+                plt.clf()
+
                 s_ = torch.argmax(s_prediction_softmax_arrangement, dim=1)
                 self.logger.info('s_.shape{}'.format(s_.shape))
                 self.logger.info('s_'.format(s_))

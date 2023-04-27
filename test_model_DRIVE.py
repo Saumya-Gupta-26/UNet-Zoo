@@ -3,8 +3,8 @@ Saumya: Making modifications to use custom datasets
 
 run command:
 
-CUDA_VISIBLE_DEVICES=6 python test_model_saum.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_DRIVE_test.py local
-CUDA_VISIBLE_DEVICES=7 python test_model_saum.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_DRIVE_test.py local
+CUDA_VISIBLE_DEVICES=6 python test_model_DRIVE.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_DRIVE_test.py local
+CUDA_VISIBLE_DEVICES=7 python test_model_DRIVE.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_DRIVE_test.py local
 '''
 import os
 from importlib.machinery import SourceFileLoader
@@ -65,7 +65,7 @@ if __name__ == '__main__':
     test_set = DRIVE_folder(exp_config.train_datalist, exp_config.folders)
     test_generator = torch.utils.data.DataLoader(test_set,batch_size=1,shuffle=False,num_workers=1, drop_last=False)
 
-    model.test(test_generator, sys_config=sys_config)
+    model.test(test_generator, sys_config=sys_config) # if this is not called, next call generates black images
     model.generate_images(test_generator, sys_config=sys_config)
 
 

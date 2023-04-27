@@ -3,13 +3,12 @@ import torch.nn as nn
 from models.probabilistic_unet import ProbabilisticUnet
 from utils import normalise_image
 
-experiment_name = 'ProbabilisticUnet_DRIVE'
-log_dir_name = 'DRIVE'
+experiment_name = 'ProbabilisticUnet_ROSE'
+log_dir_name = 'ROSE'
 
-folders = ["/data/saumgupta/DRIVE/test/images-patches-type2/", "/data/saumgupta/DRIVE/test/1st_manual-png-patches-type2"]
-train_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/train-list.csv"
-validation_datalist = "/home/saumgupta/dmt-crf-gnn-mlp/2D/params/val-list.csv"
-image_size = (1, 256, 256) # change accordingly (1,128,128)
+folders = ["/data/saumgupta/rose/data/ROSE-1/SVC/test/img-patches", "/data/saumgupta/rose/data/ROSE-1/SVC/test/gt-patches"]
+train_datalist = ""
+validation_datalist = ""
 
 # number of filter for the latent levels, they will be applied in the order as loaded into the list
 filter_channels = [32, 64, 128, 192, 192, 192, 192]
@@ -28,10 +27,11 @@ use_reversible = False
 exponential_weighting = True
 
 # use 1 for grayscale, 3 for RGB images
-input_channels = 3
+input_channels = 1
 epochs_to_train = 20
 train_batch_size = 6
 val_batch_size = 1
+image_size = (1, 128, 128)
 
 augmentation_options = {'do_flip_lr': True,
                         'do_flip_ud': True,

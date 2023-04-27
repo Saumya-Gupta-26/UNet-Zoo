@@ -76,7 +76,7 @@ def truncated_normal_(tensor, mean=0, std=1):
 
 
 def init_weights(m):
-    if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d:
+    if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d or type(m) == nn.Conv3d or type(m) == nn.ConvTranspose3d:
         nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
         #nn.init.normal_(m.weight, std=0.001)
         #nn.init.normal_(m.bias, std=0.001)
@@ -84,7 +84,7 @@ def init_weights(m):
 
 
 def init_weights_orthogonal_normal(m):
-    if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d:
+    if type(m) == nn.Conv2d or type(m) == nn.ConvTranspose2d or type(m) == nn.Conv3d or type(m) == nn.ConvTranspose3d:
         nn.init.orthogonal_(m.weight)
         truncated_normal_(m.bias, mean=0, std=0.001)
         #nn.init.normal_(m.bias, std=0.001)
@@ -247,6 +247,56 @@ def variance_ncc_dist(sample_arr, gt_arr):
     return (1/M)*sum(ncc_list)
 
 
+
+def variance_ncc_dist_3d(sample_arr, gt_arr):
+
+    def pixel_wise_xent(m_samp, m_gt, eps=1e-8):
+
+        log_samples = np.log(m_samp + eps)
+
+        return -1.0*np.sum(m_gt*log_samples, axis=0)
+
+    """
+    :param sample_arr: expected shape N x X x Y x Z
+    :param gt_arr: M x X x Y x Z
+    :return: 
+    """
+    sample_arr = sample_arr.detach().cpu().numpy()
+    gt_arr = gt_arr.detach().cpu().numpy()
+
+    mean_seg = np.mean(sample_arr, axis=0)
+
+    N = sample_arr.shape[0]
+    M = gt_arr.shape[0]
+
+    sX = sample_arr.shape[2]
+    sY = sample_arr.shape[3]
+    sZ = sample_arr.shape[4]
+
+    E_ss_arr = np.zeros((N,sX,sY,sZ))
+    for i in range(N):
+        E_ss_arr[i,...] = pixel_wise_xent(sample_arr[i,...], mean_seg)
+        # print('pixel wise xent')
+        # plt.imshow( E_ss_arr[i,...])
+        # plt.show()
+
+    E_ss = np.mean(E_ss_arr, axis=0)
+
+    E_sy_arr = np.zeros((M,N, sX, sY, sZ))
+    for j in range(M):
+        for i in range(N):
+            E_sy_arr[j,i, ...] = pixel_wise_xent(sample_arr[i,...], gt_arr[j,...])
+
+    E_sy = np.mean(E_sy_arr, axis=1)
+
+    ncc_list = []
+    for j in range(M):
+
+        ncc_list.append(ncc(E_ss, E_sy[j,...]))
+
+    return (1/M)*sum(ncc_list)
+
+
 def show_tensor(tensor):
     """Show images with matplotlib for debugging, only for 128,128"""
     with torch.no_grad():
@@ -297,7 +347,11 @@ def convert_to_onehot_torch(lblmap, nlabels):
             output[ii, :, :] = lbl
     elif len(lblmap.shape) == 4:
         # 3D images from brats are already one hot encoded
-        output = lblmap
+        # Saumya : my 3D data is not one-hot encoded, so adding functionality
+        output = torch.zeros((nlabels, lblmap.shape[-3], lblmap.shape[-2], lblmap.shape[-1]))
+        for ii in range(nlabels):
+            lbl = (lblmap == ii).view(lblmap.shape[-3], lblmap.shape[-2], lblmap.shape[-1])
+            output[ii, :, :] = lbl
     return output.long()
 
 

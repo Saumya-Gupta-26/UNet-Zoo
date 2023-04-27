@@ -5,6 +5,7 @@
 # test code by outputting few patches
 # training, testing, val
 import torch
+import SimpleITK as sitk
 import os, glob, sys
 import numpy as np
 from PIL import Image
@@ -400,6 +401,193 @@ class ROSE(data.Dataset):
         #torch_gt = new_torch_gt
 
         return torch_img, torch_gt, self.dataCPU['filename'][index]
+
+
+
+class ROSE_folder(data.Dataset):
+    def __init__(self, listpath, folderpaths):
+
+        self.listpath = listpath
+        self.imgfolder = folderpaths[0]
+        self.gtfolder = folderpaths[1]
+        self.suffix = ".tif"
+
+        self.dataCPU = {}
+        self.dataCPU['image'] = []
+        self.dataCPU['label'] = []
+        self.dataCPU['filename'] = []
+
+        self.indices = [] 
+        self.to_tensor = transforms.ToTensor()
+
+        self.loadCPU()
+
+    def loadCPU(self):
+        mylist = glob.glob(self.imgfolder + "/*" + self.suffix)
+        subdir = False
+        if len(mylist) == 0:
+            subdir = True
+            mylist = glob.glob(self.imgfolder + "/*/*" + self.suffix)
+
+        assert len(mylist) != 0
+
+        mylist.sort()        
+
+        for i, im_path in enumerate(mylist):
+            gt_path = im_path.replace("img", "gt")
+
+            assert os.path.exists(gt_path)
+
+            img = Image.open(im_path)
+            img = self.to_tensor(img)
+
+            gt = np.expand_dims(np.array(Image.open(gt_path))/255., 0)
+            gt = torch.from_numpy(gt)
+
+            #normalize within a channel
+            for j in range(img.shape[0]):
+                meanval = img[j].mean()
+                stdval = img[j].std()
+                img[j] = (img[j] - meanval) / stdval
+
+            self.indices.append((i))
+
+            #cpu store
+            self.dataCPU['image'].append(img)
+            self.dataCPU['label'].append(gt)
+            self.dataCPU['filename'].append(im_path.split('/')[-2] + '/' + im_path.split('/')[-1].replace(self.suffix,""))
+
+    def __len__(self): # total number of 2D slices
+        return len(self.indices)
+
+    def __getitem__(self, index): # return CHW torch tensor
+        index = self.indices[index]
+        #print("Doing {}".format(self.dataCPU['filename'][index]))
+        return self.dataCPU['image'][index], self.dataCPU['label'][index], self.dataCPU['filename'][index]
+
+
+
+
+class Dataset3D_OnlineLoad(torch.utils.data.Dataset):
+    def __init__(self, listpath, folderpaths, dataname="sbu", normalize="meanstd", is_training=True):
+
+        self.listpath = listpath
+        self.imgfolder = folderpaths[0]
+        self.gtfolder = folderpaths[1]
+
+        self.dataCPU = {}
+        self.dataCPU['files'] = []
+        self.dataname = dataname
+        self.normalize = normalize
+
+        # for synthetic and sbu
+        self.patchsize = [128,128,128]
+        self.is_training = is_training
+
+        self.loadCPU() # only load the filename
+        print("Length of dataset (num of 3D volumes): {}".format(len(self.dataCPU['files'])))
+
+    def loadCPU(self):
+        with open(self.listpath, 'r') as f:
+            mylist = f.readlines()
+        mylist = [x.rstrip('\n') for x in mylist]
+
+        for i, entry in enumerate(mylist):
+            #cpu store
+            self.dataCPU['files'].append(entry.split(',')[0])
+        
+        print("Num files: {}\n".format(len(self.dataCPU['files'])))
+
+    def interpolate(self,nparr):
+        omin = -1.0
+        omax = 1.0
+        imin  = np.min(nparr)
+        imax = np.max(nparr)
+
+        return (nparr-imin)*(omax-omin)/(imax-imin) + omin
+
+
+    def preprocess(self, filename):
+            if self.dataname == "synthetic":
+                arrayimage = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(self.imgfolder, filename+".nii.gz"))).astype(np.float32)
+                arrayimage_gt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(self.gtfolder, filename+".nii.gz"))).astype(np.float32)
+
+            elif self.dataname == "sbu":
+                arrayimage = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(self.imgfolder, filename+"_0000.nii.gz"))).astype(np.float32)
+                arrayimage_gt = sitk.GetArrayFromImage(sitk.ReadImage(os.path.join(self.gtfolder, filename+".nii.gz"))).astype(np.float32)
+
+            assert arrayimage.shape == arrayimage_gt.shape #DHW
+
+            '''
+            if minslice is None:
+                minslice = 0
+            if maxslice is None:
+                maxslice = arrayimage.shape[0]
+
+            arrayimage = arrayimage[minslice:maxslice]
+            arrayimage_gt = arrayimage_gt[minslice:maxslice]
+
+            if self.is_training is False:
+                arrayimage = arrayimage[:, int(components[3]):int(components[4]),int(components[5]):int(components[6])]
+                arrayimage_gt = arrayimage_gt[:, int(components[3]):int(components[4]),int(components[5]):int(components[6])]
+
+            else:
+                arrayimage = arrayimage[:,160:400,160:400]
+                arrayimage_gt = arrayimage_gt[:,160:400,160:400]
+
+            assert arrayimage.shape == arrayimage_gt.shape
+            '''
+
+            #normalize the whole volume, even though only a crop will be taken
+            if self.normalize == "meanstd":
+                meanval = arrayimage.mean()
+                stdval = arrayimage.std()
+
+                if stdval == 0.0:
+                    arrayimage = arrayimage/meanval
+                else:
+                    arrayimage = (arrayimage - meanval) / stdval
+
+            elif self.normalize == "interpolate":
+                arrayimage = self.interpolate(arrayimage)
+
+            else:
+                print("wrong normalize chosen; aborting...")
+                sys.exit()
+
+            return arrayimage, arrayimage_gt
+
+
+    def __len__(self): # total number of 3D volumes
+        return len(self.dataCPU['files'])
+
+    def __getitem__(self, index): # return CDHW torch tensor
+        fileidx = self.dataCPU['files'][index]
+        np_img, np_gt = self.preprocess(fileidx) #DHW
+
+        if self.is_training is True:
+            # crop to patchsize. compute top-left corner first
+            volshape = np_img.shape
+            corner_d = np.random.randint(low=0, high=volshape[0]-self.patchsize[0])
+            corner_h = np.random.randint(low=0, high=volshape[1]-self.patchsize[1])
+            corner_w = np.random.randint(low=0, high=volshape[2]-self.patchsize[2])
+
+            np_img = np_img[corner_d:corner_d+self.patchsize[0], corner_h:corner_h+self.patchsize[1], corner_w:corner_w+self.patchsize[2]]
+            np_gt = np_gt[corner_d:corner_d+self.patchsize[0], corner_h:corner_h+self.patchsize[1], corner_w:corner_w+self.patchsize[2]]
+
+        else: #constant center crop for validation ; full volume is too large for a 3D model on GPU
+            if self.dataname == "synthetic":
+                np_img = np_img[236:364,88:216,98:226]
+                np_gt = np_gt[236:364,88:216,98:226]
+
+            elif self.dataname == "sbu":
+                np_img = np_img[132:260,88:216,98:226] # change if patchsize is 96 or 128
+                np_gt = np_gt[132:260,88:216,98:226]
+
+        torch_img = torch.unsqueeze(torch.from_numpy(np_img),dim=0) # CDHW
+        torch_gt = torch.unsqueeze(torch.from_numpy(np_gt),dim=0) # CDHW
+
+        return torch_img, torch_gt, fileidx 
 
 
 
