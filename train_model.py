@@ -9,8 +9,13 @@ CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/exp
 CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_ROSE_train.py local
 CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_ROSE_train.py local
 
+3D parse
 CUDA_VISIBLE_DEVICES=5 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_PARSE_train.py local
 CUDA_VISIBLE_DEVICES=4 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_PARSE_train.py local
+
+2D parse
+CUDA_VISIBLE_DEVICES=1 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/prob_unet_PARSE2D_train.py local
+CUDA_VISIBLE_DEVICES=2 python train_model.py /home/saumgupta/UNet-Zoo/models/experiments/phiseg_7_5_6_PARSE2D_train.py local
 '''
 import torch
 import numpy as np
@@ -30,7 +35,7 @@ import pdb
 # own files
 import utils
 from torch.utils.data import DataLoader
-from dataloader import DRIVE, ROSE, Dataset3D_OnlineLoad
+from dataloader import DRIVE, ROSE, Dataset3D_OnlineLoad, PARSE_2D
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -120,6 +125,9 @@ class UNetModel:
         elif exp_config.dataname == "parse":      
             training_set = Dataset3D_OnlineLoad(exp_config.train_datalist, exp_config.folders)
             validation_set = Dataset3D_OnlineLoad(exp_config.validation_datalist, exp_config.folders,is_training=False) # dependent on image size
+        elif exp_config.dataname == "parse2d":      
+            training_set = PARSE_2D(exp_config.train_datalist, exp_config.folders, is_training=True)
+            validation_set = PARSE_2D(exp_config.validation_datalist, exp_config.folders, is_training=False) # dependent on image size
 
         self.training_generator = torch.utils.data.DataLoader(training_set,batch_size=exp_config.train_batch_size,shuffle=True,num_workers=2, drop_last=True)
         self.validation_generator = torch.utils.data.DataLoader(validation_set,batch_size=exp_config.val_batch_size,shuffle=False,num_workers=2, drop_last=False)

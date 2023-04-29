@@ -590,6 +590,94 @@ class Dataset3D_OnlineLoad(torch.utils.data.Dataset):
         return torch_img, torch_gt, fileidx 
 
 
+class PARSE_2D(data.Dataset):
+    def __init__(self, listpath, folderpaths, is_training=False):
+
+        self.listpath = listpath
+        self.imgfolder = folderpaths[0]
+        self.gtfolder = folderpaths[1]
+
+        self.dataCPU = {}
+        self.dataCPU['files'] = []
+        self.dataCPU['minx'] = []
+        self.dataCPU['miny'] = []
+
+        self.to_tensor = transforms.ToTensor()
+        self.crop_size = 128
+        self.is_training = is_training
+
+        self.loadCPU()
+
+    def loadCPU(self):
+        with open(self.listpath, 'r') as f:
+            mylist = f.readlines()
+        mylist = [x.rstrip('\n') for x in mylist]
+        allnames = os.listdir(self.imgfolder)
+        allnames = [n for n in allnames if ".npy" in n]
+
+        for i, entry in enumerate(mylist):
+            fname = entry.split(',')[0]
+            templist = [n for n in allnames if fname in n]
+
+            if len(entry.split(',')) > 2:
+                self.dataCPU['minx'].append(entry.split(',')[1])
+                self.dataCPU['miny'].append(entry.split(',')[2])
+            
+            self.dataCPU['files'].extend(templist)
+
+        print("Num files: {}\n".format(len(self.dataCPU['files'])))
+        if len(self.dataCPU['minx']) != 0:
+            assert len(self.dataCPU['minx']) == len(self.dataCPU['files'])
+
+
+
+    def preprocess(self, filename):
+        arrayimage = np.load(os.path.join(self.imgfolder, filename))
+        arrayimage_gt = np.load(os.path.join(self.gtfolder, filename))
+
+        assert arrayimage.shape == arrayimage_gt.shape #HW
+
+        return arrayimage, arrayimage_gt
+
+
+    def __len__(self): # total number of 2D slices
+        return len(self.dataCPU['files'])
+
+    def __getitem__(self, index): # return CHW torch tensor
+        fileidx = self.dataCPU['files'][index]
+        np_img_full, np_gt_full = self.preprocess(fileidx) #HW
+        volshape = np_img_full.shape
+
+        if self.is_training is True:
+            # crop to patchsize. compute top-left corner first
+            flag = True
+            #print("entering loop - {}".format(fileidx))
+            while flag:
+                corner_h = np.random.randint(low=0, high=volshape[0]-self.crop_size)
+                corner_w = np.random.randint(low=0, high=volshape[1]-self.crop_size)
+                np_gt = np_gt_full[corner_h:corner_h+self.crop_size, corner_w:corner_w+self.crop_size]
+
+                if np.sum(np_gt) < 20:
+                    continue
+                flag = False
+                np_img = np_img_full[corner_h:corner_h+self.crop_size, corner_w:corner_w+self.crop_size]
+            #print("exiting loop")
+            
+
+        else: #constant center crop for validation ; full volume is too large for a 3D model on GPU
+            minx = int(self.dataCPU['minx'][index])
+            miny = int(self.dataCPU['miny'][index])
+            np_img = np_img_full[minx:minx+self.crop_size,miny:miny+self.crop_size]
+            np_gt = np_gt_full[minx:minx+self.crop_size,miny:miny+self.crop_size]
+
+            #sitkimage = sitk.GetImageFromArray(np_gt.astype(np.uint8))
+            #sitk.WriteImage(sitkimage, os.path.join("/scr/saumgupta/crf-dmt/testing-temp/git-code/dmt-crf-gnn-mlp/2D", fileidx.replace(".npy","_crop.nii.gz")))
+
+        torch_img = torch.unsqueeze(torch.from_numpy(np_img),dim=0) # CHW
+        torch_gt = torch.unsqueeze(torch.from_numpy(np_gt),dim=0) # CHW
+
+        return torch_img, torch_gt, fileidx.replace(".npy","") 
+
 
 
 if __name__ == "__main__":
