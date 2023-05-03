@@ -591,7 +591,7 @@ class Dataset3D_OnlineLoad(torch.utils.data.Dataset):
 
 
 class PARSE_2D(data.Dataset):
-    def __init__(self, listpath, folderpaths, is_training=False):
+    def __init__(self, listpath, folderpaths, is_training=False, is_testing=False):
 
         self.listpath = listpath
         self.imgfolder = folderpaths[0]
@@ -605,6 +605,7 @@ class PARSE_2D(data.Dataset):
         self.to_tensor = transforms.ToTensor()
         self.crop_size = 128
         self.is_training = is_training
+        self.is_testing = is_testing
 
         self.loadCPU()
 
@@ -648,7 +649,11 @@ class PARSE_2D(data.Dataset):
         np_img_full, np_gt_full = self.preprocess(fileidx) #HW
         volshape = np_img_full.shape
 
-        if self.is_training is True:
+        if self.is_testing is True:
+            np_img = np_img_full 
+            np_gt = np_gt_full
+
+        elif self.is_training is True:
             # crop to patchsize. compute top-left corner first
             flag = True
             #print("entering loop - {}".format(fileidx))
@@ -662,9 +667,8 @@ class PARSE_2D(data.Dataset):
                 flag = False
                 np_img = np_img_full[corner_h:corner_h+self.crop_size, corner_w:corner_w+self.crop_size]
             #print("exiting loop")
-            
 
-        else: #constant center crop for validation ; full volume is too large for a 3D model on GPU
+        else: #constant center crop for validation ;
             minx = int(self.dataCPU['minx'][index])
             miny = int(self.dataCPU['miny'][index])
             np_img = np_img_full[minx:minx+self.crop_size,miny:miny+self.crop_size]
@@ -677,6 +681,7 @@ class PARSE_2D(data.Dataset):
         torch_gt = torch.unsqueeze(torch.from_numpy(np_gt),dim=0) # CHW
 
         return torch_img, torch_gt, fileidx.replace(".npy","") 
+
 
 
 

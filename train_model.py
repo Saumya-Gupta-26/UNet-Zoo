@@ -38,6 +38,7 @@ from torch.utils.data import DataLoader
 from dataloader import DRIVE, ROSE, Dataset3D_OnlineLoad, PARSE_2D
 import seaborn as sns
 import matplotlib.pyplot as plt
+import SimpleITK as sitk
 
 # catch all the warnings with the debugger
 # import warnings
@@ -426,7 +427,7 @@ class UNetModel:
                 n_samples = 10
 
                 #for ii in range(data.test.images.shape[0]):
-                for x_b, s_b, _ in test_generator:
+                for x_b, s_b, filename in test_generator:
                     ii += 1
                     #s_gt_arr = data.test.labels[ii, ...] # saum i think num_gt,C,H,W
 
@@ -569,9 +570,9 @@ class UNetModel:
 
             ii = -1
             #for ii in range(31,100):
-            for x_b, s_b, _ in test_generator:
+            for x_b, s_b, filename in test_generator:
                 ii += 1
-
+                filename = filename[0]
                 #s_gt_arr = data.test.labels[ii, ...]
 
                 # from HW to NCHW
@@ -609,35 +610,61 @@ class UNetModel:
                 ax = sns.heatmap(var_map, cmap=plt.cm.coolwarm, vmin=0, vmax=1)
                 ax.set_axis_off()
                 plt.show()
-                plt.savefig(os.path.join(image_path, '{}sample_heatmap.png'.format(ii)), bbox_inches='tight', pad_inches=0)
+                if self.exp_config.dataname == "parse2d":
+                    plt.savefig(os.path.join(image_path, filename + '_heatmap.png'), bbox_inches='tight', pad_inches=0)  
+                else:      
+                    plt.savefig(os.path.join(image_path, '{}sample_heatmap.png'.format(ii)), bbox_inches='tight', pad_inches=0)
                 plt.clf()
+                avg_likelihood = np.mean(imglist, axis=0)
+                if self.exp_config.dataname == "parse2d":
+                    np.save(os.path.join(image_path, filename + '_lm.npy'), avg_likelihood)
+                else:
+                    np.save(os.path.join(image_path, '{}sample_lm.npy'.format(ii)), avg_likelihood)
 
                 s_ = torch.argmax(s_prediction_softmax_arrangement, dim=1)
                 self.logger.info('s_.shape{}'.format(s_.shape))
                 self.logger.info('s_'.format(s_))
 
-                self.save_images(image_path, patch, val_masks, s_, ii)
+                if self.exp_config.dataname == "parse2d":
+                    self.save_images(image_path, patch, val_masks, s_, ii, filename)
+                else:
+                    self.save_images(image_path, patch, val_masks, s_, ii)
 
     def save_images(self, save_location, image, ground_truth_labels, sample,
-                    iteration):
+                    iteration, filename=""):
         from torchvision.utils import save_image
 
-        save_image(image, os.path.join(save_location, '{}image.png'.format(iteration)), pad_value=1, scale_each=True,
+        if filename == "":
+            save_image(image, os.path.join(save_location, '{}image.png'.format(iteration)), pad_value=1, scale_each=True,
                    normalize=True)
 
         ground_truth_labels = torch.unsqueeze(ground_truth_labels, dim=0)
-        for i in range(self.exp_config.num_labels_per_subject):
-            save_image(ground_truth_labels[i].float(),
-                       os.path.join(save_location, '{}mask{}.png'.format(iteration, i)),
-                       pad_value=1,
-                       scale_each=True,
-                       normalize=True)
+        if filename=="":
+            for i in range(self.exp_config.num_labels_per_subject):
+                save_image(ground_truth_labels[i].float(),
+                        os.path.join(save_location, '{}mask{}.png'.format(iteration, i)),
+                        pad_value=1,
+                        scale_each=True,
+                        normalize=True)
+
         for i in range(10):
-            save_image(sample[i].float(),
+            if filename == "":
+                save_image(sample[i].float(),
                        os.path.join(save_location, '{}sample{}.png'.format(iteration, i)),
                        pad_value=1,
                        scale_each=True,
                        normalize=True)
+            else:
+                save_image(sample[i].float(),
+                       os.path.join(save_location, filename + '_binary_sample{}.png'.format(i)),
+                       pad_value=1,
+                       scale_each=True,
+                       normalize=True)
+                tempimg = sample[i].detach().cpu().numpy()
+                tempimg = np.where(tempimg >= 0.5, 1., 0.).astype(np.uint8)
+                sitkimage = sitk.GetImageFromArray(tempimg)
+                sitk.WriteImage(sitkimage, os.path.join(save_location, filename + '_binary_sample{}.nii.gz'.format(str(i).zfill(2))))
+
 
 
     def save_model(self, savename):
